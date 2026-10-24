@@ -501,13 +501,21 @@ impl<P: AnisetteProvider> CloudMessagesClient<P> {
     }
 
     async fn sync_records<T: CloudKitRecord>(&self, zone: &str, continuation_token: Option<Vec<u8>>) -> Result<(Vec<u8>, HashMap<String, Option<T>>, i32), PushError> {
-        info!("Getting records");
-        let container = self.get_container().await?;
+        let started = std::time::Instant::now();
+        let stage = match zone { "chatManateeZone" => "chats", "messageManateeZone" => "messages", "attachmentManateeZone" => "attachments", _ => "records" };
+        info!(target: "icloud_sync", "stage={stage} state=start");
+        let container = self.get_container().await.map_err(|error| {
+            log::warn!(target: "icloud_sync", "stage={stage} state=failed category=container_unavailable elapsed_ms={}", started.elapsed().as_millis());
+            error
+        })?;
 
         let zone = container.private_zone(zone.to_string());
-        info!("Getting encryption config");
-        let key = container.get_zone_encryption_config(&zone, &self.keychain, &MESSAGES_SERVICE).await?;
-        info!("Got encryption config");
+        info!(target: "icloud_sync", "stage=encryption_config state=start");
+        let key = container.get_zone_encryption_config(&zone, &self.keychain, &MESSAGES_SERVICE).await.map_err(|error| {
+            log::warn!(target: "icloud_sync", "stage=encryption_config state=failed category=keychain_or_encryption_config elapsed_ms={}", started.elapsed().as_millis());
+            error
+        })?;
+        info!(target: "icloud_sync", "stage=encryption_config state=ok elapsed_ms={}", started.elapsed().as_millis());
         let (_assets, response) = container.perform(&CloudKitSession::new(),
             FetchRecordChangesOperation(cloudkit_proto::RetrieveChangesRequest { 
                 sync_continuation_token: continuation_token, 
@@ -516,7 +524,10 @@ impl<P: AnisetteProvider> CloudMessagesClient<P> {
                 assets_to_download: Some(NO_ASSETS.clone()), 
                 newest_first: Some(true),
                 ..Default::default()
-            })).await?;
+            })).await.map_err(|error| {
+                log::warn!(target: "icloud_sync", "stage={stage} state=failed category=record_fetch_failed elapsed_ms={}", started.elapsed().as_millis());
+                error
+            })?;
 
         let mut results = HashMap::new();
 
@@ -534,17 +545,21 @@ impl<P: AnisetteProvider> CloudMessagesClient<P> {
             let pcskey = match pcs_keys_for_record(&record, &key) {
                 Ok(key) => key,
                 Err(PushError::PCSRecordKeyMissing) => {
+                    log::warn!(target: "icloud_sync", "stage={stage} state=failed category=record_key_missing");
                     container.clear_cache_zone_encryption_config(&zone).await;
                     return Err(PushError::PCSRecordKeyMissing)
                 },
-                Err(e) => return Err(e)
+                Err(e) => {
+                    log::warn!(target: "icloud_sync", "stage={stage} state=failed category=record_decryption_failed");
+                    return Err(e)
+                }
             };
             let item = T::from_record_encrypted(&record.record_field, Some(&pcskey));
 
             results.insert(identifier, Some(item));
         }
 
-        info!("Getting finish");
+        info!(target: "icloud_sync", "stage={stage} state=ok records={} changes={} elapsed_ms={}", results.len(), response.change.len(), started.elapsed().as_millis());
 
         Ok((response.sync_continuation_token().to_vec(), results, response.status()))
     }
