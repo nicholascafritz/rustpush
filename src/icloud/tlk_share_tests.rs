@@ -26,10 +26,9 @@ fn legacy_payload() -> Vec<u8> {
         0i64.to_le_bytes().as_slice()].concat()
 }
 
-// This adapter follows the production verification call site on the baseline.
-// Only its API call changes when PR #34 adds the record-fields argument.
-fn payload(share: &CuttlefishTlkShare, _fields: &[Field]) -> Vec<u8> {
-    share.data_for_signing()
+// Follow the production verification call site; fixture expectations are unchanged.
+fn payload(share: &CuttlefishTlkShare, fields: &[Field]) -> Vec<u8> {
+    share.data_for_signing(fields)
 }
 
 fn trusted_peer() -> (EncodedPeer, PKey<Private>) {
