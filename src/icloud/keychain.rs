@@ -284,6 +284,10 @@ impl CuttlefishTlkShare {
     }
 }
 
+#[cfg(test)]
+#[path = "tlk_share_tests.rs"]
+mod tlk_share_tests;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct IESCiphertext {
     #[serde(rename = "SFIESAuthenticationCode")]
