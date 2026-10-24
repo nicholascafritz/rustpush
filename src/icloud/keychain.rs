@@ -284,9 +284,7 @@ impl CuttlefishTlkShare {
         "signature",
         "version",
         "parentkeyref",
-        "parentKeyRef",
         "wrappedkey",
-        "wrappedKey",
     ];
 
     fn data_for_signing(&self, fields: &[Field]) -> Vec<u8> {
@@ -309,17 +307,16 @@ impl CuttlefishTlkShare {
         }).collect();
         extras.sort_by(|a, b| a.0.cmp(b.0));
 
-        for (name, field) in extras {
+        let mut included = 0;
+        for (_, field) in extras {
             if let Some(value) = field.value.as_ref() {
                 if let Some(bytes) = extra_field_signing_bytes(value) {
-                    info!("Including extra TLK share field {name} in signature ({} bytes)", bytes.len());
+                    included += 1;
                     data.extend_from_slice(&bytes);
-                } else {
-                    debug!("Skipping extra TLK share field {name} (unsupported CloudKit type)");
                 }
             }
         }
-
+        info!(target: "icloud_sync", "stage=tlk_signature_payload extra_fields={included}");
         data
     }
 }
@@ -335,11 +332,22 @@ fn extra_field_signing_bytes(value: &cloudkit_proto::record::field::Value) -> Op
         Some(t) if t == FieldType::Int64Type as i32 => {
             Some(value.signed_value?.to_le_bytes().to_vec())
         }
+        Some(t) if t == FieldType::DoubleType as i32 => {
+            // CKRecord doubles are NSNumber too; Apple appends unsignedLongLongValue.
+            // Only finite, representable values have a defined scalar conversion.
+            let n = value.double_value?.trunc();
+            if !n.is_finite() || n < i64::MIN as f64 || n >= 18446744073709551616.0 {
+                return None;
+            }
+            let n = if n < 0.0 { (n as i64) as u64 } else { n as u64 };
+            Some(n.to_le_bytes().to_vec())
+        }
         Some(t) if t == FieldType::DateType as i32 => {
             // NSISO8601DateFormatter default (InternetDateTime, GMT): yyyy-MM-dd'T'HH:mm:ssZ
             let secs = value.date_value.as_ref()?.time?;
             let unix = 978307200.0 + secs;
-            let dt = DateTime::<Utc>::from_timestamp(unix.trunc() as i64, 0)?;
+            if !unix.is_finite() { return None; }
+            let dt = DateTime::<Utc>::from_timestamp(unix.floor() as i64, 0)?;
             Some(dt.format("%Y-%m-%dT%H:%M:%SZ").to_string().into_bytes())
         }
         // Skip CKReference, NSArray, CLLocation, CKAsset, and other types Apple ignores.
