@@ -11,7 +11,7 @@ fn share() -> CuttlefishTlkShare {
 }
 
 fn field(name: &str, value: FieldValue) -> Field {
-    Field { identifier: Some(Identifier { name: Some(name.into()), ..Default::default() }),
+    Field { identifier: Some(cloudkit_proto::record::field::Identifier { name: Some(name.into()), ..Default::default() }),
         value: Some(value), ..Default::default() }
 }
 
