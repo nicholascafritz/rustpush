@@ -204,11 +204,32 @@ fn tlk_missing_class_key_is_an_error_not_a_panic() {
 
 #[test]
 fn tlk_all_invalid_shares_cannot_look_successful() {
-    assert!(finish_tlk_share_fetch(vec![], 1).is_err());
+    assert!(finish_tlk_share_fetch(vec![], 1, 1).is_err());
 }
 
 #[test]
 fn tlk_valid_share_survives_other_invalid_shares() {
     let keys = vec![CuttlefishSerializedKey::default()];
-    assert_eq!(finish_tlk_share_fetch(keys, 1).unwrap().len(), 1);
+    assert_eq!(finish_tlk_share_fetch(keys, 1, 1).unwrap().len(), 1);
+}
+
+#[test]
+fn tlk_missing_record_inner_returns_error_without_panic() {
+    let record = cloudkit_proto::CuttlefishRecord::default();
+    let result = std::panic::catch_unwind(|| tlk_share_record_fields(&record));
+    assert!(result.is_ok(), "Missing CloudKit record inner must not panic");
+    assert!(result.unwrap().is_err());
+}
+
+#[test]
+fn tlk_all_non_signature_rejections_cannot_look_successful() {
+    assert!(finish_tlk_share_fetch(vec![], 0, 2).is_err());
+    assert!(finish_tlk_share_fetch(vec![], 0, 0).unwrap().is_empty(),
+        "A genuinely empty response keeps its original semantics");
+}
+
+#[test]
+fn tlk_signature_failure_keeps_its_error_category() {
+    let error = finish_tlk_share_fetch(vec![], 1, 1).unwrap_err();
+    assert!(error.to_string().to_lowercase().contains("signature verification failed"));
 }

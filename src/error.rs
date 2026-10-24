@@ -56,6 +56,10 @@ pub enum PushError {
     SendErr(i64),
     #[error("Bad message")]
     BadMsg,
+    #[error("TLK share signature verification failed")]
+    TlkShareSignatureInvalid,
+    #[error("TLK share data unavailable or malformed")]
+    TlkShareUnavailable,
     #[error("MMCS Upload failed {0}")]
     MMCSUploadFailed(u16),
     #[error("MMCS GET failed {0:?}")]

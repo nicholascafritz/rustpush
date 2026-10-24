@@ -356,10 +356,18 @@ fn extra_field_signing_bytes(value: &cloudkit_proto::record::field::Value) -> Op
 }
 
 // Continue past individual bad shares, but never turn all-invalid into zero-result success.
-fn finish_tlk_share_fetch(keys: Vec<CuttlefishSerializedKey>, signature_failures: usize) -> Result<Vec<CuttlefishSerializedKey>, PushError> {
+fn tlk_share_record_fields(record: &cloudkit_proto::CuttlefishRecord) -> Result<&[Field], PushError> {
+    Ok(&record.inner.as_ref().ok_or(PushError::TlkShareUnavailable)?.record_field)
+}
+
+fn finish_tlk_share_fetch(keys: Vec<CuttlefishSerializedKey>, signature_failures: usize, rejected: usize) -> Result<Vec<CuttlefishSerializedKey>, PushError> {
     if keys.is_empty() && signature_failures > 0 {
         warn!(target: "icloud_sync", "stage=tlk_share_fetch state=failed category=signature_invalid");
-        return Err(PushError::BadMsg);
+        return Err(PushError::TlkShareSignatureInvalid);
+    }
+    if keys.is_empty() && rejected > 0 {
+        warn!(target: "icloud_sync", "stage=tlk_share_fetch state=failed category=tlk_unavailable");
+        return Err(PushError::TlkShareUnavailable);
     }
     Ok(keys)
 }
@@ -1892,23 +1900,34 @@ impl<P: AnisetteProvider> KeychainClient<P> {
         })?;
         info!(target: "icloud_sync", "stage=tlk_share_discovery state=ok shares={} elapsed_ms={}", response.shares.len(), started.elapsed().as_millis());
         let mut signature_failures = 0;
+        let mut rejected = 0;
         let mut verified = 0;
         let mut keys = vec![];
         let state = self.state.read().await;
         for share in response.shares {
             let Some(share_record) = &share.share else {
+                rejected += 1;
                 warn!(target: "icloud_sync", "stage=tlk_share_verification state=skipped category=record_missing");
                 continue;
             };
-            let record_fields = &share_record.inner.as_ref().unwrap().record_field;
+            let record_fields = match tlk_share_record_fields(share_record) {
+                Ok(fields) => fields,
+                Err(_) => {
+                    rejected += 1;
+                    warn!(target: "icloud_sync", "stage=tlk_share_verification state=skipped category=record_malformed");
+                    continue;
+                }
+            };
             let item = CuttlefishTlkShare::from_record(record_fields);
 
             let Some(sending_peer) = state.state.get(&item.sender) else {  
+                rejected += 1;
                 warn!(target: "icloud_sync", "stage=tlk_share_verification state=skipped category=sender_missing");
                 continue
             };
             if sending_peer.verify_signature_dig(MessageDigest::sha256(), &item.data_for_signing(record_fields), &base64_decode(&item.signature)).is_err() {
                 signature_failures += 1;
+                rejected += 1;
                 warn!(target: "icloud_sync", "stage=tlk_share_verification state=skipped category=signature_invalid");
                 continue;
             }
@@ -1947,8 +1966,8 @@ impl<P: AnisetteProvider> KeychainClient<P> {
             
             keys.push(result);
         }
-        info!(target: "icloud_sync", "stage=tlk_share_fetch verified={verified} rejected={signature_failures} keys={} elapsed_ms={}", keys.len(), started.elapsed().as_millis());
-        finish_tlk_share_fetch(keys, signature_failures)
+        info!(target: "icloud_sync", "stage=tlk_share_fetch verified={verified} rejected={rejected} signature_failures={signature_failures} keys={} elapsed_ms={}", keys.len(), started.elapsed().as_millis());
+        finish_tlk_share_fetch(keys, signature_failures, rejected)
     }
 
     pub async fn get_share_tlks(&self) -> Result<Vec<CuttlefishSerializedKey>, PushError> {
