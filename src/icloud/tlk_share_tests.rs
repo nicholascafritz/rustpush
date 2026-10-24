@@ -74,3 +74,30 @@ fn tlk_invalid_signature_is_rejected() {
     let data = payload(&share(), &[]);
     assert!(peer.verify_signature_dig(MessageDigest::sha256(), &data, &sign(&wrong_key, &data)).is_err());
 }
+
+#[test]
+fn tlk_extra_scalars_match_apple_canonical_bytes() {
+    let fields = vec![
+        bytes("wrappedKey", &[9]), // Unknown camel-case field: Apple does not exclude this alias.
+        bytes("server_metadata", &[99]),
+        field("eDate", FieldValue { r#type: Some(FieldType::DateType as i32),
+            date_value: Some(cloudkit_proto::Date { time: Some(-978307200.5), ..Default::default() }), ..Default::default() }),
+        field("dDouble", FieldValue { r#type: Some(FieldType::DoubleType as i32), double_value: Some(32.75), ..Default::default() }),
+        field("cInteger", FieldValue { r#type: Some(FieldType::Int64Type as i32), signed_value: Some(-2), ..Default::default() }),
+        field("bString", FieldValue { r#type: Some(FieldType::StringType as i32), string_value: Some("fixture".into()), ..Default::default() }),
+        bytes("aBytes", &[7, 8]),
+    ];
+    let expected = [legacy_payload(), vec![7, 8], b"fixture".to_vec(), (-2i64).to_le_bytes().to_vec(),
+        32u64.to_le_bytes().to_vec(), b"1969-12-31T23:59:59Z".to_vec(), vec![9]].concat();
+    assert_eq!(payload(&share(), &fields), expected,
+        "Extra fields must follow CKKSTLKShare sorted scalar serialization, including NSNumber doubles");
+}
+
+#[test]
+fn tlk_changed_ownership_proof_is_rejected() {
+    let (peer, key) = trusted_peer();
+    let original = [legacy_payload(), vec![1, 2, 3]].concat();
+    let signature = sign(&key, &original);
+    assert!(peer.verify_signature_dig(MessageDigest::sha256(),
+        &payload(&share(), &[bytes("tlkOwnershipProof", &[1, 2, 4])]), &signature).is_err());
+}
