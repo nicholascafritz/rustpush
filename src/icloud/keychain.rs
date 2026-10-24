@@ -355,6 +355,11 @@ fn extra_field_signing_bytes(value: &cloudkit_proto::record::field::Value) -> Op
     }
 }
 
+// Preserve PR #34's result behavior until the failure-propagation regression is applied.
+fn finish_tlk_share_fetch(keys: Vec<CuttlefishSerializedKey>, _signature_failures: usize) -> Result<Vec<CuttlefishSerializedKey>, PushError> {
+    Ok(keys)
+}
+
 #[cfg(test)]
 #[path = "tlk_share_tests.rs"]
 mod tlk_share_tests;
@@ -1054,6 +1059,10 @@ impl KeychainKeyStore {
 
     pub fn get_key(&self, zone: &str, class: &str) -> Option<&CloudKey> {
         self.0.iter().find(|k| k.zone_name == zone && k.keyclass == class)
+    }
+
+    fn require_key(&self, zone: &str, class: &str) -> Result<&CloudKey, PushError> {
+        Ok(self.get_key(zone, class).expect("Insert class key not found"))
     }
 
     pub fn get_key_id(&self, uuid: &str) -> Option<&CloudKey> {

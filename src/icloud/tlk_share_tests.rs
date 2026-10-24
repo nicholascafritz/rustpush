@@ -101,3 +101,19 @@ fn tlk_changed_ownership_proof_is_rejected() {
     assert!(peer.verify_signature_dig(MessageDigest::sha256(),
         &payload(&share(), &[bytes("tlkOwnershipProof", &[1, 2, 4])]), &signature).is_err());
 }
+
+#[test]
+fn tlk_missing_class_key_is_an_error_not_a_panic() {
+    assert!(KeychainKeyStore(vec![]).require_key("synthetic-zone", "classA").is_err());
+}
+
+#[test]
+fn tlk_all_invalid_shares_cannot_look_successful() {
+    assert!(finish_tlk_share_fetch(vec![], 1).is_err());
+}
+
+#[test]
+fn tlk_valid_share_survives_other_invalid_shares() {
+    let keys = vec![CuttlefishSerializedKey::default()];
+    assert_eq!(finish_tlk_share_fetch(keys, 1).unwrap().len(), 1);
+}
